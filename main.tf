@@ -1,10 +1,10 @@
 provider "aws" {
-  region = "us-east-1"
+  region = var.default_region
 }
 
 // Initial wide range VPC
 resource "aws_vpc" "myvpc" {
-  cidr_block = "172.16.0.0/16"
+  cidr_block = var.vpc_cidr
 
   tags = {
     Name = "public_vpc"
@@ -14,8 +14,8 @@ resource "aws_vpc" "myvpc" {
 // Initial private subnet
 resource "aws_subnet" "my_subnet" {
   vpc_id            = aws_vpc.myvpc.id
-  cidr_block        = "172.16.10.0/24"
-  availability_zone = "us-east-1a"
+  cidr_block        = var.subnet_cidr
+  availability_zone = var.default_az
 
   tags = {
     Name = "isolated_subnet"
@@ -79,26 +79,11 @@ resource "aws_security_group" "allow_rdp" {
 // Create NIC card with specific IP within the private subnet with both SG's attached
 resource "aws_network_interface" "my_nic" {
   subnet_id       = aws_subnet.my_subnet.id
-  private_ips     = ["172.16.10.100"]
+  private_ips     = [var.default_ip]
   security_groups = [aws_security_group.allow_rdp.id, aws_security_group.allow_tls.id]
 
   tags = {
     Name = "primary_network_interface"
-  }
-}
-
-// Create EC2 using free Windows micro tier 
-resource "aws_instance" "myec2" {
-  ami           = "ami-03295ec1641924349"
-  instance_type = "t2.micro"
-
-// What does unlimited do?
-  credit_specification {
-    cpu_credits = "unlimited"
-  }
-
-  tags = {
-    Name = "primary_instance"
   }
 }
 
@@ -127,7 +112,7 @@ DOC
 // Create a maintenance window for once a week on Sundays, 2 hour duration, 1 hour cutoff
 resource "aws_ssm_maintenance_window" "weekend" {
   name     = "maintenance-window-application"
-  schedule = "cron(0 15 ? * SUN *)"
+  schedule = var.ssm_schedule
   duration = 2
   cutoff   = 1
 }
@@ -173,7 +158,7 @@ resource "aws_ssm_maintenance_window_target" "my_target" {
 
   targets {
     key    = "tag:Name"
-    values = ["primary_instance"]
+    values = [aws_instance.myec2.tags_all.Name] // "primary_instance"
   }
 }
 
@@ -187,11 +172,64 @@ resource "aws_ssm_association" "my_ssm_association" {
   }
 }
 
-output "vpcid" {
-  value = aws_vpc.myvpc.id
+//////////////////////
+
+#Instance Role
+resource "aws_iam_role" "ssm_role" {
+  name = "test-ssm-ec2"
+  assume_role_policy = <<EOF
+{
+"Version": "2012-10-17",
+"Statement": [
+    {
+    "Action": "sts:AssumeRole",
+    "Principal": {
+        "Service": "ec2.amazonaws.com"
+    },
+    "Effect": "Allow",
+    "Sid": ""
+    }
+]
+}
+EOF
+
+  tags = {
+    Name = "test-ssm-ec2"
+  }
 }
 
-output "ec2ip" {
-  value = aws_instance.myec2.private_ip
+#Instance Profile
+resource "aws_iam_instance_profile" "my_profile" {
+  name = "test-ssm-ec2"
+  role = "${aws_iam_role.ssm_role.id}"
 }
 
+#Attach Policies to Instance Role
+resource "aws_iam_policy_attachment" "iam_attach_ssm" {
+  name       = "test-attachment"
+  roles      = [aws_iam_role.ssm_role.id]
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_policy_attachment" "iam_attach_ec2_role" {
+  name       = "test-attachment"
+  roles      = [aws_iam_role.ssm_role.id]
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+}
+
+// Create EC2 using free Windows micro tier 
+resource "aws_instance" "myec2" {
+  ami           = var.default_ami
+  instance_type = "t2.micro"
+  iam_instance_profile = aws_iam_instance_profile.my_profile.id
+  user_data = "${file("C:\\code\\in-house-screener-infra\\ssm\\install-ssm.ps1")}"
+
+  // What does unlimited do?
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
+
+  tags = {
+    Name = "primary_instance"
+  }
+}
