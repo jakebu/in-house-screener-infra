@@ -220,7 +220,7 @@ resource "aws_iam_policy_attachment" "iam_attach_ec2_role" {
 // Create EC2 using free Windows micro tier 
 resource "aws_instance" "myec2" {
   ami           = var.default_ami
-  instance_type = "t2.micro"
+  instance_type = var.default_instance_type
   iam_instance_profile = aws_iam_instance_profile.my_profile.id
   user_data = "${file("C:\\code\\in-house-screener-infra\\ssm\\install-ssm.ps1")}"
 

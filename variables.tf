@@ -30,5 +30,10 @@ variable "default_ip" {
 
 variable "default_ami" {
     type = string
-    default = "ami-03295ec1641924349" // Windows Server 2019 x64
+    default = "ami-01e4c18598be12113" // Windows Server 2025 Core Base x64
+}
+
+variable "default_instance_type" {
+    type = string
+    default = "t3.micro"
 }
